@@ -28,7 +28,7 @@ pub use context::TaskContext;
 use lazy_static::*;
 pub use manager::{fetch_task, TaskManager};
 use switch::__switch;
-pub use task::{TaskControlBlock, TaskStatus};
+pub use task::{TaskControlBlock, TaskInfo, TaskStatus};
 
 pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 pub use manager::add_task;
@@ -119,4 +119,51 @@ lazy_static! {
 ///Add init process to the manager
 pub fn add_initproc() {
     add_task(INITPROC.clone());
+}
+/// Update the current task's information when this task use a systemcall.
+pub fn update_current_task_info(syscall_id: u32) {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .task_info
+        .update(syscall_id);
+}
+
+/// Get the current task's information for the sys_task_info syscall.
+pub fn get_current_task_info() -> TaskInfo {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .task_info
+        .clone()
+}
+
+/// Get mmap
+pub fn mmap(start: usize, len: usize, port: usize) -> isize {
+    let res = current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .memory_set
+        .get_page_table()
+        .sys_alloc_mem(start, len, port);
+    res
+}
+
+/// Unmap
+pub fn unmap(start: usize, len: usize) -> isize {
+    let res = current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .memory_set
+        .get_page_table()
+        .sys_delloc_mem(start, len);
+    res
+}
+
+/// set_priority
+pub fn set_priority(prio: usize) {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .set_priority(prio);
 }

@@ -99,7 +99,7 @@ impl PageTable {
                 break;
             }
             if !pte.is_valid() {
-                let frame = frame_alloc().unwrap();
+                let frame: FrameTracker = frame_alloc().unwrap();
                 *pte = PageTableEntry::new(frame.ppn, PTEFlags::V);
                 self.frames.push(frame);
             }
@@ -155,6 +155,74 @@ impl PageTable {
     /// get the token from the page table
     pub fn token(&self) -> usize {
         8usize << 60 | self.root_ppn.0
+    }
+    /// allocate memory
+    pub fn sys_alloc_mem(&mut self, start: usize, len: usize, port: usize) -> isize {
+        if port & !0x7 != 0 || port & 0x7 == 0 {
+            return -1;
+        }
+        if VirtAddr::from(start).page_offset() != 0 {
+            println!("va error");
+            return -1;
+        }
+
+        let sa_vpn = VirtAddr::from(start).floor();
+        let en_vpn = VirtAddr::from(start + len - 1).floor();
+
+        println!(
+            "[ALLOC] start vpn = {}, and end vpn = {}",
+            sa_vpn.0, en_vpn.0
+        );
+
+        for va_start in sa_vpn.0..=en_vpn.0 {
+            let x: VirtPageNum = va_start.into();
+
+            if let Some(pte) = self.translate(va_start.into()) {
+                if pte.is_valid() {
+                    println!("has mapped");
+                    return -1;
+                }
+            }
+
+            match frame_alloc() {
+                Some(frame) => {
+                    println!("success vpn = {}, ppn ={} ", x.0, frame.ppn.0);
+                    self.map(va_start.into(), frame.ppn, set_flag_by_port(port << 1));
+                    self.frames.push(frame);
+                }
+                None => {
+                    println!("not enough page");
+                    return -1;
+                }
+            }
+        }
+        0
+    }
+
+    /// For unmmap syscall, to deallocate the memory
+    pub fn sys_delloc_mem(&mut self, start: usize, len: usize) -> isize {
+        let sa_vpn = VirtAddr::from(start).floor();
+        let en_vpn = VirtAddr::from(start + len - 1).floor();
+        println!(
+            "[Dellocate] start vpn = {}, and end vpn = {}",
+            sa_vpn.0, en_vpn.0
+        );
+
+        for va_start in sa_vpn.0..=en_vpn.0 {
+            let x: VirtPageNum = va_start.into();
+            println!("cur vpn = {}", x.0);
+            if let Some(pte) = self.translate(va_start.into()) {
+                if !pte.is_valid() {
+                    return -1;
+                }
+                self.unmap(va_start.into());
+            } else {
+                println!("not mapped page");
+                return -1;
+            }
+        }
+        // for va_start in sa_vpn.0..=en_vpn.0 {}
+        0
     }
 }
 
@@ -217,6 +285,22 @@ pub fn translated_refmut<T>(token: usize, ptr: *mut T) -> &'static mut T {
         .translate_va(VirtAddr::from(va))
         .unwrap()
         .get_mut()
+}
+
+/// For mmap syscall, to allocate the memory
+
+fn set_flag_by_port(port: usize) -> PTEFlags {
+    let mut flags = PTEFlags::V | PTEFlags::U;
+    if port & 0x2 != 0 {
+        flags |= PTEFlags::R;
+    }
+    if port & 0x4 != 0 {
+        flags |= PTEFlags::W;
+    }
+    if port & 0x8 != 0 {
+        flags |= PTEFlags::X;
+    }
+    flags
 }
 
 /// An abstraction over a buffer passed from user space to kernel space
