@@ -4,7 +4,7 @@
 //!
 //! `UPSafeCell<OSInodeInner>` -> `OSInode`: for static `ROOT_INODE`,we
 //! need to wrap `OSInodeInner` into `UPSafeCell`
-use super::File;
+use super::{File, Stat, StatMode};
 use crate::drivers::BLOCK_DEVICE;
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
@@ -53,8 +53,8 @@ impl OSInode {
         v
     }
 }
-
 lazy_static! {
+    /// e
     pub static ref ROOT_INODE: Arc<Inode> = {
         let efs = EasyFileSystem::open(BLOCK_DEVICE.clone());
         Arc::new(EasyFileSystem::root_inode(&efs))
@@ -154,5 +154,37 @@ impl File for OSInode {
             total_write_size += write_size;
         }
         total_write_size
+    }
+    fn stat(&self) -> Option<(usize, usize)> {
+        Some(self.inner.exclusive_access().inode.get_block_position())
+    }
+}
+
+/// link a file
+pub fn create_link(old_name: &str, new_name: &str) -> isize {
+    ROOT_INODE.link(old_name, new_name)
+}
+
+/// unlink a file
+pub fn unlink(name: &str) -> isize {
+    if let Some(inode) = ROOT_INODE.find(name) {
+        if ROOT_INODE.get_link_number(inode.get_block_position()) == 1 {
+            // clear data if only one link exists
+            inode.clear();
+        }
+        return ROOT_INODE.unlink(name);
+    }
+    -1
+}
+
+/// get fstate
+pub fn fstat(position: (usize, usize)) -> Stat {
+    let (ino, nlink) = ROOT_INODE.fstat(position);
+    Stat {
+        dev: 0,
+        ino,
+        mode: StatMode::FILE,
+        nlink,
+        pad: [0; 7],
     }
 }

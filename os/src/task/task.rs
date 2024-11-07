@@ -10,7 +10,6 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
-
 /// Task control block structure
 ///
 /// Directly save the contents that will not change during running
@@ -127,6 +126,14 @@ impl TaskControlBlockInner {
             self.fd_table.push(None);
             self.fd_table.len() - 1
         }
+    }
+
+    /// get the target file by fd of this task.
+    pub fn get_file(&self, fd: usize) -> Option<(usize, usize)> {
+        if let Some(Some(file)) = self.fd_table.get(fd) {
+            return file.stat();
+        }
+        None
     }
 }
 
@@ -295,6 +302,14 @@ impl TaskControlBlock {
                     task_status: TaskStatus::Ready,
                     task_info: TaskInfo::new(),
                     memory_set,
+                    fd_table: vec![
+                        // 0 -> stdin
+                        Some(Arc::new(Stdin)),
+                        // 1 -> stdout
+                        Some(Arc::new(Stdout)),
+                        // 2 -> stderr
+                        Some(Arc::new(Stdout)),
+                    ],
                     parent: Some(Arc::downgrade(self)),
                     children: Vec::new(),
                     exit_code: 0,
@@ -346,6 +361,11 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+
+    /// get inode by fd in this task
+    pub fn get_file(&self, fd: usize) -> Option<(usize, usize)> {
+        self.inner_exclusive_access().get_file(fd)
     }
 }
 
