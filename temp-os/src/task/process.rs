@@ -438,9 +438,9 @@ impl ProcessControlBlock {
                 }
             }
         }
-        println!("=============work=============\n");
-        println!("mutex  {:?}", work.0);
-        println!("sema  {:?}", work.1);
+        // println!("=============work=============\n");
+        // println!("mutex  {:?}", work.0);
+        // println!("sema  {:?}", work.1);
 
         println!("\n\n=============allocation=============\n");
         for tid in finish.iter() {
@@ -448,11 +448,11 @@ impl ProcessControlBlock {
             println!("Thread {} sema {:?}", tid, inner.allocation[tid].1);
         }
 
-        println!("\n\n=============need=============\n");
-        for tid in finish.iter() {
-            println!("Thread {} mutex {:?}", tid, inner.need[tid].0);
-            println!("Thread {} sema {:?}", tid, inner.need[tid].1);
-        }
+        // println!("\n\n=============need=============\n");
+        // for tid in finish.iter() {
+        //     println!("Thread {} mutex {:?}", tid, inner.need[tid].0);
+        //     println!("Thread {} sema {:?}", tid, inner.need[tid].1);
+        // }
         loop {
             if finish.is_empty() {
                 return false;
