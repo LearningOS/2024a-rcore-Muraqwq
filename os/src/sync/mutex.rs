@@ -103,7 +103,7 @@ impl Mutex for MutexBlocking {
     fn unlock(&self) {
         trace!("kernel: MutexBlocking::unlock");
         let mut mutex_inner = self.inner.exclusive_access();
-        // assert!(mutex_inner.locked);
+        assert!(mutex_inner.locked);
         if let Some(waking_task) = mutex_inner.wait_queue.pop_front() {
             wakeup_task(waking_task);
         } else {
@@ -112,8 +112,8 @@ impl Mutex for MutexBlocking {
     }
 
     fn get_next(&self) -> Option<usize> {
-        let mut inner = self.inner.exclusive_access();
-        if let Some(waking_task) = inner.wait_queue.pop_front() {
+        let inner = self.inner.exclusive_access();
+        if let Some(waking_task) = inner.wait_queue.get(0) {
             let tid = waking_task
                 .inner_exclusive_access()
                 .res

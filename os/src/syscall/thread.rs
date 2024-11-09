@@ -41,8 +41,8 @@ pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
         tasks.push(None);
     }
     tasks[new_task_tid] = Some(Arc::clone(&new_task));
-    let mut_len = process_inner.allocation[0].0.len();
-    let sem_len = process_inner.allocation[0].1.len();
+    let mut_len = process_inner.available.0.len();
+    let sem_len = process_inner.available.1.len();
     process_inner
         .allocation
         .push((vec![0; mut_len], vec![0; sem_len]));

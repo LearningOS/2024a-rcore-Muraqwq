@@ -55,20 +55,16 @@ impl Semaphore {
     ///
     pub fn get_next(&self) -> Option<usize> {
         let inner = self.inner.exclusive_access();
-        if inner.wait_queue.is_empty() {
-            return None;
+        if let Some(waking_task) = inner.wait_queue.get(0) {
+            let tid = waking_task
+                .inner_exclusive_access()
+                .res
+                .as_ref()
+                .unwrap()
+                .tid;
+            return Some(tid);
         } else {
-            return Some(
-                inner
-                    .wait_queue
-                    .get(0)
-                    .unwrap()
-                    .inner_exclusive_access()
-                    .res
-                    .as_ref()
-                    .unwrap()
-                    .tid,
-            );
+            return None;
         }
     }
 }

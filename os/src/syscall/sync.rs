@@ -94,9 +94,9 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
     } else {
         process_inner.need[tid].0[mutex_id] = 1;
         drop(process_inner);
-        if process.deadlock_detect() {
+        if process.deadlock_enable() && process.deadlock_detect() {
             drop(process);
-            return 0xDEAD;
+            return -0xDEAD;
         }
     }
     drop(task_inner);
@@ -247,9 +247,9 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
     } else {
         process_inner.need[tid].1[sem_id] += 1;
         drop(process_inner);
-        if process.deadlock_detect() {
+        if process.deadlock_enable() && process.deadlock_detect() {
             drop(process);
-            return 0xDEAD;
+            return -0xDEAD;
         }
     }
     drop(task_inner);
