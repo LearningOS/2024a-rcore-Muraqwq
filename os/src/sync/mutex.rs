@@ -12,6 +12,8 @@ pub trait Mutex: Sync + Send + AToAny {
     fn lock(&self);
     /// Unlock the mutex
     fn unlock(&self);
+    ///
+    fn get_next(&self) -> Option<usize>;
 }
 
 /// Spinlock Mutex struct
@@ -50,6 +52,10 @@ impl Mutex for MutexSpin {
         trace!("kernel: MutexSpin::unlock");
         let mut locked = self.locked.exclusive_access();
         *locked = false;
+    }
+
+    fn get_next(&self) -> Option<usize> {
+        None
     }
 }
 
@@ -102,6 +108,21 @@ impl Mutex for MutexBlocking {
             wakeup_task(waking_task);
         } else {
             mutex_inner.locked = false;
+        }
+    }
+
+    fn get_next(&self) -> Option<usize> {
+        let mut inner = self.inner.exclusive_access();
+        if let Some(waking_task) = inner.wait_queue.pop_front() {
+            let tid = waking_task
+                .inner_exclusive_access()
+                .res
+                .as_ref()
+                .unwrap()
+                .tid;
+            return Some(tid);
+        } else {
+            return None;
         }
     }
 }

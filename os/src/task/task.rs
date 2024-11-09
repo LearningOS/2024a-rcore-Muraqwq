@@ -5,7 +5,6 @@ use super::{kstack_alloc, KernelStack, ProcessControlBlock, TaskContext};
 use crate::trap::TrapContext;
 use crate::{mm::PhysPageNum, sync::UPSafeCell};
 use alloc::sync::{Arc, Weak};
-use alloc::vec::Vec;
 use core::cell::RefMut;
 
 /// Task control block structure
@@ -66,16 +65,6 @@ impl TaskControlBlock {
         let trap_cx_ppn = res.trap_cx_ppn();
         let kstack = kstack_alloc();
         let kstack_top = kstack.get_top();
-        process
-            .inner_exclusive_access()
-            .allocation
-            .entry(res.tid)
-            .or_insert((Vec::new(), Vec::new()));
-        process
-            .inner_exclusive_access()
-            .need
-            .entry(res.tid)
-            .or_insert((Vec::new(), Vec::new()));
         Self {
             process: Arc::downgrade(&process),
             kstack,

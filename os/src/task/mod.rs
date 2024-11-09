@@ -80,10 +80,6 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     let mut task_inner = task.inner_exclusive_access();
     let process = task.process.upgrade().unwrap();
     let tid = task_inner.res.as_ref().unwrap().tid;
-    let mut process_inner = process.inner_exclusive_access();
-    process_inner.allocation.remove(&tid);
-    process_inner.need.remove(&tid);
-    drop(process_inner);
     // record exit code
     task_inner.exit_code = Some(exit_code);
     task_inner.res = None;
@@ -163,6 +159,9 @@ pub fn exit_current_and_run_next(exit_code: i32) {
         process_inner.fd_table.clear();
         // remove all tasks
         process_inner.tasks.clear();
+        process_inner.mutex_list.clear();
+        process_inner.allocation.clear();
+        process_inner.need.clear();
     }
     drop(process);
     // we do not have to save task context

@@ -7,15 +7,12 @@ use super::{add_task, SignalFlags};
 use super::{pid_alloc, PidHandle};
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE};
-use crate::sync::{Condvar, Mutex, MutexBlocking, MutexSpin, Semaphore, UPSafeCell};
+use crate::sync::{Condvar, Mutex, Semaphore, UPSafeCell};
 use crate::trap::{trap_handler, TrapContext};
-use alloc::collections::btree_map::BTreeMap;
-use alloc::collections::btree_set::BTreeSet;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
-use core::any::Any;
 use core::cell::RefMut;
 
 /// Process Control Block
@@ -52,10 +49,12 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// available list
+    pub available: (Vec<isize>, Vec<isize>),
     /// allocation matrix
-    pub allocation: BTreeMap<usize, (Vec<Option<usize>>, Vec<Option<usize>>)>,
+    pub allocation: Vec<(Vec<isize>, Vec<isize>)>,
     /// need matrix
-    pub need: BTreeMap<usize, (Vec<Option<usize>>, Vec<Option<usize>>)>,
+    pub need: Vec<(Vec<isize>, Vec<isize>)>,
     /// enable of deadlock detect
     pub dead_lock_detect_enable: usize,
 }
@@ -91,134 +90,109 @@ impl ProcessControlBlockInner {
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
     }
-    /// get allocation_matrix
-    pub fn get_avaliable(&self) -> (Vec<Option<usize>>, Vec<Option<usize>>) {
-        let mut mutex_alloc: Vec<Option<usize>> = Vec::new();
-        let mut semaphore_alloc = Vec::new();
-        for mutex in &self.mutex_list {
-            match mutex {
-                Some(mutex) => {
-                    let it: &dyn Any = (&**mutex).as_any();
-                    if let Some(i) = it.downcast_ref::<MutexBlocking>() {
-                        if i.inner.exclusive_access().locked {
-                            mutex_alloc.push(Some(0));
-                        } else {
-                            mutex_alloc.push(Some(1));
-                        }
-                    } else {
-                        if let Some(i) = it.downcast_ref::<MutexSpin>() {
-                            if *i.locked.exclusive_access() {
-                                mutex_alloc.push(Some(0));
-                            } else {
-                                mutex_alloc.push(Some(1));
-                            }
-                        } else {
-                            println!("What :( ");
-                        }
-                    }
-                }
-                None => {
-                    mutex_alloc.push(None);
-                }
-            }
-        }
+    // pub fn get_avaliable(&self) -> (Vec<isize>, Vec<isize>) {
+    //     let mut mutex_alloc: Vec<isize> = Vec::new();
+    //     let mut semaphore_alloc: Vec<isize> = Vec::new();
+    //     for mutex in &self.mutex_list {
+    //         match mutex {
+    //             Some(mutex) => {
+    //                 let it: &dyn Any = (&**mutex).as_any();
+    //                 if let Some(i) = it.downcast_ref::<MutexBlocking>() {
+    //                     if i.inner.exclusive_access().locked {
+    //                         mutex_alloc.push(0);
+    //                     } else {
+    //                         mutex_alloc.push(1);
+    //                     }
+    //                 } else {
+    //                     if let Some(i) = it.downcast_ref::<MutexSpin>() {
+    //                         if *i.locked.exclusive_access() {
+    //                             mutex_alloc.push(0);
+    //                         } else {
+    //                             mutex_alloc.push(1);
+    //                         }
+    //                     } else {
+    //                         println!("What :( ");
+    //                     }
+    //                 }
+    //             }
+    //             None => {
+    //                 mutex_alloc.push(0);
+    //             }
+    //         }
+    //     }
 
-        for semaphore in &self.semaphore_list {
-            match semaphore {
-                Some(sema) => {
-                    semaphore_alloc.push(Some(sema.inner.exclusive_access().count.max(0) as usize));
-                }
-                None => {
-                    semaphore_alloc.push(None);
-                }
-            }
-        }
-        (mutex_alloc, semaphore_alloc)
-    }
+    //     for semaphore in &self.semaphore_list {
+    //         match semaphore {
+    //             Some(sema) => {
+    //                 semaphore_alloc.push(sema.inner.exclusive_access().count);
+    //             }
+    //             None => {
+    //                 semaphore_alloc.push(0);
+    //             }
+    //         }
+    //     }
+    //     (mutex_alloc, semaphore_alloc)
+    // }
 
-    ///
-    pub fn get_resource(&mut self, tid: usize, cls: usize, id: usize) {
-        println!("Thread {} get res {}, id {}", tid, cls, id);
-        self.need_resource_back(tid, cls, id);
+    // ///
+    // pub fn get_resource(&mut self, tid: usize, cls: usize, id: usize) {
+    //     println!("Thread {} get res {}, id {}", tid, cls, id);
+    //     self.need_resource_back(tid, cls, id);
 
-        let list2 = match cls {
-            0 => &mut self.allocation.get_mut(&tid).unwrap().0,
-            1 => &mut self.allocation.get_mut(&tid).unwrap().1,
-            _ => panic!("Invalid class identifier: {}", cls),
-        };
+    //     let list = match cls {
+    //         0 => &mut self.allocation.get_mut(&tid).unwrap().0,
+    //         1 => &mut self.allocation.get_mut(&tid).unwrap().1,
+    //         _ => panic!("Invalid class identifier: {}", cls),
+    //     };
 
-        while list2.len() < id + 1 {
-            list2.push(None);
-        }
-        if let Some(ref mut num) = list2[id] {
-            *num += 1;
-        } else {
-            list2[id] = Some(1);
-        }
+    //     while list.len() < id + 1 {
+    //         list.push(0);
+    //     }
 
-        println!(
-            "Thread {} get res {}, id {}, now allocation len is {}",
-            tid,
-            cls,
-            id,
-            list2.len()
-        );
-    }
+    //     list[id] += 1;
 
-    ///
-    pub fn free_resource(&mut self, tid: usize, cls: usize, id: usize) {
-        println!("Thread {} free res {}, id {}", tid, cls, id);
+    //     println!(
+    //         "Thread {} get res {}, id {}, now allocation[{}] is {}",
+    //         tid, cls, id, id, list[id]
+    //     );
+    // }
 
-        let list = match cls {
-            0 => &mut self.allocation.get_mut(&tid).unwrap().0,
-            1 => &mut self.allocation.get_mut(&tid).unwrap().1,
-            _ => panic!("Invalid class identifier: {}", cls),
-        };
-        if id >= list.len() {
-            return;
-        }
-        if let Some(ref mut num) = list[id] {
-            if *num == 0 {
-                return;
-            }
-            *num -= 1;
-        }
-    }
+    // ///
+    // pub fn free_resource(&mut self, tid: usize, cls: usize, id: usize) {
+    //     println!("Thread {} free res {}, id {}", tid, cls, id);
 
-    ///
-    pub fn need_resource(&mut self, tid: usize, cls: usize, id: usize) {
-        println!("Thread {} need res {}, id {}", tid, cls, id);
-        let list = match cls {
-            0 => &mut self.need.get_mut(&tid).unwrap().0,
-            1 => &mut self.need.get_mut(&tid).unwrap().1,
-            _ => panic!("Invalid class identifier: {}", cls),
-        };
+    //     let list = match cls {
+    //         0 => &mut self.allocation.get_mut(&tid).unwrap().0,
+    //         1 => &mut self.allocation.get_mut(&tid).unwrap().1,
+    //         _ => panic!("Invalid class identifier: {}", cls),
+    //     };
+    //     list[id] -= 1;
+    // }
 
-        while list.len() < id + 1 {
-            list.push(None);
-        }
-        if let Some(ref mut num) = list[id] {
-            *num += 1;
-        } else {
-            list[id] = Some(1);
-        }
-    }
+    // ///
+    // pub fn need_resource(&mut self, tid: usize, cls: usize, id: usize) {
+    //     println!("Thread {} need res {}, id {}", tid, cls, id);
+    //     let list = match cls {
+    //         0 => &mut self.need.get_mut(&tid).unwrap().0,
+    //         1 => &mut self.need.get_mut(&tid).unwrap().1,
+    //         _ => panic!("Invalid class identifier: {}", cls),
+    //     };
 
-    ///
-    pub fn need_resource_back(&mut self, tid: usize, cls: usize, id: usize) {
-        let list = match cls {
-            0 => &mut self.need.get_mut(&tid).unwrap().0,
-            1 => &mut self.need.get_mut(&tid).unwrap().1,
-            _ => panic!("Invalid class identifier: {}", cls),
-        };
+    //     while list.len() < id + 1 {
+    //         list.push(0);
+    //     }
+    //     list[id] += 1;
+    // }
 
-        if let Some(ref mut num) = list[id] {
-            if *num == 0 {
-                return;
-            }
-            *num -= 1;
-        }
-    }
+    // ///
+    // pub fn need_resource_back(&mut self, tid: usize, cls: usize, id: usize) {
+    //     let list = match cls {
+    //         0 => &mut self.need.get_mut(&tid).unwrap().0,
+    //         1 => &mut self.need.get_mut(&tid).unwrap().1,
+    //         _ => panic!("Invalid class identifier: {}", cls),
+    //     };
+    //     list[id] -= 1;
+    // }
 }
 
 impl ProcessControlBlock {
@@ -256,8 +230,9 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
-                    allocation: BTreeMap::new(),
-                    need: BTreeMap::new(),
+                    available: (Vec::new(), Vec::new()),
+                    allocation: Vec::new(),
+                    need: Vec::new(),
                     dead_lock_detect_enable: 0,
                 })
             },
@@ -273,6 +248,8 @@ impl ProcessControlBlock {
         let trap_cx = task_inner.get_trap_cx();
         let ustack_top = task_inner.res.as_ref().unwrap().ustack_top();
         let kstack_top = task.kstack.get_top();
+        let tid = task_inner.res.as_ref().unwrap().tid;
+        println!("main thread tid {}", tid);
         drop(task_inner);
         *trap_cx = TrapContext::app_init_context(
             entry_point,
@@ -284,6 +261,8 @@ impl ProcessControlBlock {
         // add main thread to the process
         let mut process_inner = process.inner_exclusive_access();
         process_inner.tasks.push(Some(Arc::clone(&task)));
+        process_inner.allocation.push((Vec::new(), Vec::new()));
+        process_inner.need.push((Vec::new(), Vec::new()));
         drop(process_inner);
         insert_into_pid2process(process.getpid(), Arc::clone(&process));
         // add main thread to scheduler
@@ -310,6 +289,12 @@ impl ProcessControlBlock {
         task_inner.res.as_mut().unwrap().ustack_base = ustack_base;
         task_inner.res.as_mut().unwrap().alloc_user_res();
         task_inner.trap_cx_ppn = task_inner.res.as_mut().unwrap().trap_cx_ppn();
+        let mut process_inner = self.inner_exclusive_access();
+        process_inner.allocation = Vec::new();
+        process_inner.need = Vec::new();
+        process_inner.allocation.push((Vec::new(), Vec::new()));
+        process_inner.need.push((Vec::new(), Vec::new()));
+        drop(process_inner);
         // push arguments on user stack
         trace!("kernel: exec .. push arguments on user stack");
         let mut user_sp = task_inner.res.as_mut().unwrap().ustack_top();
@@ -385,8 +370,9 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
-                    allocation: BTreeMap::new(),
-                    need: BTreeMap::new(),
+                    available: (Vec::new(), Vec::new()),
+                    allocation: Vec::new(),
+                    need: Vec::new(),
                     dead_lock_detect_enable: 0,
                 })
             },
@@ -410,6 +396,8 @@ impl ProcessControlBlock {
         // attach task to child process
         let mut child_inner = child.inner_exclusive_access();
         child_inner.tasks.push(Some(Arc::clone(&task)));
+        child_inner.allocation.push((Vec::new(), Vec::new()));
+        child_inner.need.push((Vec::new(), Vec::new()));
         drop(child_inner);
         // modify kstack_top in trap_cx of this thread
         let task_inner = task.inner_exclusive_access();
@@ -428,89 +416,39 @@ impl ProcessControlBlock {
     /// detect deadlock
     pub fn deadlock_detect(&self) -> bool {
         let inner = self.inner_exclusive_access();
-        let work = &mut inner.get_avaliable();
-        let mut finish = BTreeSet::new();
-        for child in &inner.tasks {
-            if let Some(tcb) = child {
-                if let Some(res) = tcb.inner_exclusive_access().res.as_ref() {
-                    let tid = res.tid;
-                    finish.insert(tid);
-                }
-            }
-        }
-        println!("=============work=============\n");
-        println!("mutex  {:?}", work.0);
-        println!("sema  {:?}", work.1);
-
-        println!("\n\n=============allocation=============\n");
-        for tid in finish.iter() {
-            println!("Thread {} mutex {:?}", tid, inner.allocation[tid].0);
-            println!("Thread {} sema {:?}", tid, inner.allocation[tid].1);
-        }
-
-        println!("\n\n=============need=============\n");
-        for tid in finish.iter() {
-            println!("Thread {} mutex {:?}", tid, inner.need[tid].0);
-            println!("Thread {} sema {:?}", tid, inner.need[tid].1);
+        let mut work = inner.available.clone();
+        let mut finish = Vec::new();
+        for _ in 0..inner.thread_count() {
+            finish.push(false);
         }
         loop {
-            if finish.is_empty() {
-                return false;
-            }
+            let mut flag = true;
             let mut remove_item: Vec<usize> = Vec::new();
-            for tid in &finish {
-                let mut flag = 1;
-
-                if inner.need[tid].0.len() != 0 {
-                    for mutex_id in 0..inner.need[tid].0.len() {
-                        if let Some(need) = inner.need[tid].0[mutex_id] {
-                            if let Some(alb) = work.0[mutex_id] {
-                                if need > alb {
-                                    flag = 0;
-                                    break;
-                                }
-                            }
-                        }
+            for thread in 0..inner.thread_count() {
+                if finish[thread] {
+                    continue;
+                }
+                for mutex in 0..work.0.len() {
+                    if inner.need[thread].0[mutex] > work.0[mutex] {
+                        flag = false;
+                        break;
                     }
                 }
-
-                if flag == 0 {
+                if !flag {
                     continue;
                 }
 
-                if inner.need[tid].1.len() != 0 {
-                    for sema_id in 0..inner.need[tid].1.len() {
-                        if let Some(need) = inner.need[tid].1[sema_id] {
-                            if let Some(alb) = work.1[sema_id] {
-                                if need > alb {
-                                    flag = 0;
-                                    break;
-                                }
-                            }
-                        }
+                for sem in 0..work.1.len() {
+                    if inner.need[thread].1[sem] > work.1[sem] {
+                        flag = false;
+                        break;
                     }
                 }
 
-                if flag == 0 {
+                if !flag {
                     continue;
                 }
-
-                if inner.allocation[tid].0.len() != 0 {
-                    for mutex_id in 0..inner.allocation[tid].0.len() {
-                        if let Some(i) = inner.allocation[tid].0[mutex_id] {
-                            work.0[mutex_id] = Some(i + work.0[mutex_id].unwrap());
-                        }
-                    }
-                }
-                if inner.allocation[tid].1.len() != 0 {
-                    for sema_id in 0..inner.allocation[tid].1.len() {
-                        if let Some(i) = inner.allocation[tid].1[sema_id] {
-                            work.1[sema_id] = Some(i + work.1[sema_id].unwrap());
-                        }
-                    }
-                }
-
-                remove_item.push(*tid);
+                remove_item.push(thread);
                 break;
             }
 
@@ -518,7 +456,19 @@ impl ProcessControlBlock {
                 return true;
             }
 
-            finish.remove(&remove_item.pop().unwrap());
+            let thread = remove_item.pop().unwrap();
+            finish[thread] = true;
+            if finish.iter().filter(|find| !**find).count() == 0 {
+                return false;
+            }
+
+            for mutex in 0..work.0.len() {
+                work.0[mutex] += inner.need[thread].0[mutex];
+            }
+
+            for sem in 0..work.1.len() {
+                work.1[sem] += inner.need[thread].1[sem];
+            }
         }
     }
     ///

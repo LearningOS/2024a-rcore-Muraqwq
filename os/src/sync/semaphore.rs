@@ -47,20 +47,28 @@ impl Semaphore {
         let mut inner = self.inner.exclusive_access();
         inner.count -= 1;
         if inner.count < 0 {
-            let tid = current_task()
-                .as_ref()
-                .unwrap()
-                .inner_exclusive_access()
-                .res
-                .as_ref()
-                .unwrap()
-                .tid;
-            if tid == 1 {
-                println!("tid 1 block")
-            };
             inner.wait_queue.push_back(current_task().unwrap());
             drop(inner);
             block_current_and_run_next();
+        }
+    }
+    ///
+    pub fn get_next(&self) -> Option<usize> {
+        let inner = self.inner.exclusive_access();
+        if inner.wait_queue.is_empty() {
+            return None;
+        } else {
+            return Some(
+                inner
+                    .wait_queue
+                    .get(0)
+                    .unwrap()
+                    .inner_exclusive_access()
+                    .res
+                    .as_ref()
+                    .unwrap()
+                    .tid,
+            );
         }
     }
 }
